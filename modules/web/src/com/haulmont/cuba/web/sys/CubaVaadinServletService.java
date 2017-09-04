@@ -18,12 +18,13 @@
 package com.haulmont.cuba.web.sys;
 
 import com.google.common.hash.HashCode;
-import com.haulmont.cuba.core.global.*;
+import com.haulmont.cuba.core.global.AppBeans;
+import com.haulmont.cuba.core.global.Configuration;
+import com.haulmont.cuba.core.global.GlobalConfig;
+import com.haulmont.cuba.core.global.Messages;
 import com.haulmont.cuba.core.sys.AppContext;
 import com.haulmont.cuba.security.global.UserSession;
 import com.haulmont.cuba.web.App;
-import com.haulmont.cuba.web.AppUI;
-import com.haulmont.cuba.web.ScreenProfiler;
 import com.haulmont.cuba.web.WebConfig;
 import com.haulmont.cuba.web.auth.RequestContext;
 import com.haulmont.cuba.web.auth.WebAuthConfig;
@@ -31,7 +32,6 @@ import com.haulmont.cuba.web.toolkit.ui.CubaFileUpload;
 import com.vaadin.server.*;
 import com.vaadin.server.communication.*;
 import com.vaadin.ui.Component;
-import com.vaadin.ui.UI;
 import elemental.json.Json;
 import elemental.json.JsonArray;
 import elemental.json.JsonObject;
@@ -46,9 +46,6 @@ import javax.servlet.http.HttpSession;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.PrintWriter;
-import java.io.Writer;
-import java.net.URL;
-import java.net.URLConnection;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -56,7 +53,6 @@ import java.util.List;
 import java.util.Locale;
 
 import static com.google.common.hash.Hashing.md5;
-import static org.apache.commons.io.IOUtils.copy;
 
 public class CubaVaadinServletService extends VaadinServletService {
 
@@ -164,7 +160,12 @@ public class CubaVaadinServletService extends VaadinServletService {
         for (RequestHandler handler : requestHandlers) {
             if (handler instanceof UidlRequestHandler) {
                 // replace UidlRequestHandler with CubaUidlRequestHandler
-                cubaRequestHandlers.add(new CubaUidlRequestHandler());
+                cubaRequestHandlers.add(new UidlRequestHandler() {
+                    @Override
+                    protected UidlWriter createUidlWriter() {
+                        return new CubaUidlWriter();
+                    }
+                });
             } else if (handler instanceof PublishedFileHandler) {
                 // replace PublishedFileHandler with CubaPublishedFileHandler
                 // for support resources from VAADIN directory
@@ -187,164 +188,6 @@ public class CubaVaadinServletService extends VaadinServletService {
         cubaRequestHandlers.add(new CubaWebJarsHandler(getServlet().getServletContext()));
 
         return cubaRequestHandlers;
-    }
-
-    // Add ability to serve web resources from WebJars
-    protected static class CubaWebJarsHandler implements RequestHandler {
-        protected static final String WEBJARS_PREFIX = "/webjars/";
-        protected static final String VAADIN_PREFIX = "/VAADIN/";
-
-        private final Logger log = LoggerFactory.getLogger(CubaWebJarsHandler.class);
-
-        protected ServletContext servletContext;
-
-        public CubaWebJarsHandler(ServletContext servletContext) {
-            this.servletContext = servletContext;
-        }
-
-        @Override
-        public boolean handleRequest(VaadinSession session, VaadinRequest request, VaadinResponse response) throws IOException {
-            String path = request.getPathInfo();
-
-            if (StringUtils.isEmpty(path) || StringUtils.isNotEmpty(path) && !path.startsWith(WEBJARS_PREFIX))
-                return false;
-
-            log.trace("WebJar resource requested: {}", path);
-
-            String errorMessage = checkResourcePath(path);
-            if (StringUtils.isNotEmpty(errorMessage)) {
-                log.error(errorMessage);
-                response.sendError(HttpServletResponse.SC_FORBIDDEN, errorMessage);
-                return false;
-            }
-
-            URL resourceUrl = getStaticResourceUrl(path);
-
-            if (resourceUrl == null) {
-                resourceUrl = getClassPathResourceUrl(path);
-            }
-
-            if (resourceUrl == null) {
-                String msg = String.format("Requested WebJar resource is not found: %s", path);
-                response.sendError(HttpServletResponse.SC_NOT_FOUND, msg);
-                log.error(msg);
-                return false;
-            }
-
-            String resourceName = getResourceName(path);
-            String mimeType = servletContext.getMimeType(resourceName);
-            response.setContentType(mimeType != null ? mimeType : FileTypesHelper.DEFAULT_MIME_TYPE);
-
-            String cacheControl = "public, max-age=0, must-revalidate";
-            int resourceCacheTime = getCacheTime(resourceName);
-            if (resourceCacheTime > 0) {
-                cacheControl = "max-age=" + String.valueOf(resourceCacheTime);
-            }
-            response.setHeader("Cache-Control", cacheControl);
-            response.setDateHeader("Expires", System.currentTimeMillis() + (resourceCacheTime * 1000));
-
-            InputStream inputStream = null;
-            try {
-                URLConnection connection = resourceUrl.openConnection();
-                long lastModifiedTime = connection.getLastModified();
-                // Remove milliseconds to avoid comparison problems (milliseconds
-                // are not returned by the browser in the "If-Modified-Since"
-                // header).
-                lastModifiedTime = lastModifiedTime - lastModifiedTime % 1000;
-                response.setDateHeader("Last-Modified", lastModifiedTime);
-
-                if (browserHasNewestVersion(request, lastModifiedTime)) {
-                    response.setStatus(HttpServletResponse.SC_NOT_MODIFIED);
-                    return true;
-                }
-
-                inputStream = connection.getInputStream();
-
-                copy(inputStream, response.getOutputStream());
-
-                return true;
-            } finally {
-                if (inputStream != null) {
-                    inputStream.close();
-                }
-            }
-        }
-
-        protected String getResourceName(String webjarsResourceURI) {
-            String[] tokens = webjarsResourceURI.split("/");
-            return tokens[tokens.length - 1];
-        }
-
-        // copy-pasted from VaadinServlet
-        protected boolean browserHasNewestVersion(VaadinRequest request, long resourceLastModifiedTimestamp) {
-            if (resourceLastModifiedTimestamp < 1) {
-                // We do not know when it was modified so the browser cannot have an
-                // up-to-date version
-                return false;
-            }
-        /*
-         * The browser can request the resource conditionally using an
-         * If-Modified-Since header. Check this against the last modification
-         * time.
-         */
-            try {
-                // If-Modified-Since represents the timestamp of the version cached
-                // in the browser
-                long headerIfModifiedSince = request
-                        .getDateHeader("If-Modified-Since");
-
-                if (headerIfModifiedSince >= resourceLastModifiedTimestamp) {
-                    // Browser has this an up-to-date version of the resource
-                    return true;
-                }
-            } catch (Exception e) {
-                // Failed to parse header. Fail silently - the browser does not have
-                // an up-to-date version in its cache.
-            }
-            return false;
-        }
-
-        protected URL getStaticResourceUrl(String path) throws IOException {
-            String staticPath = VAADIN_PREFIX + path;
-
-            URL resourceUrl = servletContext.getResource(staticPath);
-
-            if (resourceUrl != null) {
-                log.trace("Overridden version of WebJar resource found: {}", staticPath);
-            }
-
-            return resourceUrl;
-        }
-
-        protected URL getClassPathResourceUrl(String path) {
-            String classpathPath = "/META-INF/resources" + path;
-
-            log.trace("Load WebJar resource from classpath: {}", classpathPath);
-
-            return this.getClass().getResource(classpathPath);
-        }
-
-        protected int getCacheTime(String filename) {
-            if (filename.contains(".nocache.")) {
-                return 0;
-            }
-            if (filename.contains(".cache.")) {
-                return 60 * 60 * 24 * 365;
-            }
-            return 60 * 60;
-        }
-
-        protected String checkResourcePath(String url) {
-            if (url.endsWith("/")) {
-                return String.format("Directory loading is forbidden: %s", url);
-            }
-
-            if (url.contains("/../")) {
-                return String.format("Loading WebJar resource with the upward path is forbidden: %s", url);
-            }
-
-            return null;
-        }
     }
 
     // Add ability to load JS and CSS resources from VAADIN directory
@@ -433,94 +276,6 @@ public class CubaVaadinServletService extends VaadinServletService {
             }
 
             return result;
-        }
-    }
-
-    // Set security context to AppContext for normal UI requests
-    protected static class CubaUidlRequestHandler extends UidlRequestHandler {
-        private final Logger log = LoggerFactory.getLogger(CubaUidlRequestHandler.class);
-
-        protected ScreenProfiler profiler = AppBeans.get(ScreenProfiler.NAME);
-
-        protected static final String JAVASCRIPT_EXTENSION = ".js";
-        protected static final String CSS_EXTENSION = ".css";
-        protected static final String WEBJARS_PREFIX = "webjars/";
-
-        @Override
-        protected UidlWriter createUidlWriter() {
-            return new UidlWriter() {
-                @Override
-                protected void writePerformanceData(UI ui, Writer writer) throws IOException {
-                    super.writePerformanceData(ui, writer);
-
-                    String profilerMarker = profiler.getCurrentProfilerMarker(ui);
-                    if (profilerMarker != null) {
-                        profiler.setCurrentProfilerMarker(ui, null);
-                        long lastRequestTimestamp = ui.getSession().getLastRequestTimestamp();
-                        writer.write(String.format(", \"profilerMarker\": \"%s\", \"profilerEventTs\": \"%s\", \"profilerServerTime\": %s",
-                                profilerMarker, lastRequestTimestamp, System.currentTimeMillis() - lastRequestTimestamp));
-                    }
-                }
-
-                @SuppressWarnings("deprecation")
-                @Override
-                protected void handleAdditionalDependencies(List<Class<? extends ClientConnector>> newConnectorTypes,
-                                                            List<String> scriptDependencies, List<String> styleDependencies) {
-                    LegacyCommunicationManager manager = AppUI.getCurrent().getSession().getCommunicationManager();
-
-                    for (Class<? extends ClientConnector> connector : newConnectorTypes) {
-                        WebJarResource webJarResource = connector.getAnnotation(WebJarResource.class);
-                        if (webJarResource == null)
-                            continue;
-
-                        for (String uri : webJarResource.value()) {
-                            uri = processResourceUri(uri);
-
-                            if (uri.endsWith(JAVASCRIPT_EXTENSION)) {
-                                scriptDependencies.add(manager.registerDependency(uri, connector));
-                            }
-
-                            if (uri.endsWith(CSS_EXTENSION)) {
-                                styleDependencies.add(manager.registerDependency(uri, connector));
-                            }
-                        }
-                    }
-                }
-
-                protected String processResourceUri(String uri) {
-                    int propertyFirstIndex = uri.indexOf("${");
-                    if (propertyFirstIndex == -1) {
-                        return WEBJARS_PREFIX + uri;
-                    }
-
-                    int propertyLastIndex = uri.indexOf("}");
-                    if (propertyLastIndex == -1) {
-                        String errorMessage = String.format("Malformed URL of a WebJar resource: %s", uri);
-                        log.error(errorMessage);
-                        throw new RuntimeException(errorMessage);
-                    }
-
-                    String webJarVersion = StringUtils.EMPTY;
-                    String propertyName = uri.substring(propertyFirstIndex + 2, propertyLastIndex);
-
-                    int defaultVersionIdx = propertyName.indexOf("?:");
-                    if (defaultVersionIdx != -1) {
-                        webJarVersion = propertyName.substring(defaultVersionIdx + 2);
-                    }
-
-                    if (StringUtils.isEmpty(webJarVersion)) {
-                        webJarVersion = AppContext.getProperty(propertyName);
-                    }
-
-                    if (StringUtils.isEmpty(webJarVersion)) {
-                        String msg = String.format("Could not load WebJar version property value: %s", propertyName);
-                        log.error(msg);
-                        throw new RuntimeException(msg);
-                    }
-
-                    return WEBJARS_PREFIX + uri.replace("${" + propertyName + "}", webJarVersion);
-                }
-            };
         }
     }
 
