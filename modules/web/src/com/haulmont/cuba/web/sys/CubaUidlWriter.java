@@ -105,7 +105,9 @@ public class CubaUidlWriter extends UidlWriter {
         }
 
         if (StringUtils.isEmpty(webJarVersion)) {
-            String msg = String.format("Could not load WebJar version property value: %s", propertyName);
+            String msg = String.format("Could not load WebJar version property value: %s. And default version is also not set",
+                    propertyName);
+
             log.error(msg);
             throw new RuntimeException(msg);
         }

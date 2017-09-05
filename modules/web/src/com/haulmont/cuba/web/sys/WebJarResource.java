@@ -36,6 +36,9 @@ import java.lang.annotation.Target;
  * <p>
  * One more opportunity is the managing a version of a web resource by a web-app property. To declare that version should
  * be resolved from the web-app.properties use a URL like this: <code>jquery/${webjar.jquery.customVersion}</code>
+ * <p>
+ * Also if you want to set the default version of a resource, you can use Elvis operator '?:'. So the combination of a
+ * web-app property and the default version will be: <code>jquery/${webjar.jquery.customVersion?:1.12.4}</code>
  */
 @Retention(RetentionPolicy.RUNTIME)
 @Target(ElementType.TYPE)

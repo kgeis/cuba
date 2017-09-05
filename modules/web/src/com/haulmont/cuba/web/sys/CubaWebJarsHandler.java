@@ -58,7 +58,7 @@ public class CubaWebJarsHandler implements RequestHandler {
 
         String errorMessage = checkResourcePath(path);
         if (StringUtils.isNotEmpty(errorMessage)) {
-            log.error(errorMessage);
+            log.warn(errorMessage);
             response.sendError(HttpServletResponse.SC_FORBIDDEN, errorMessage);
             return false;
         }
@@ -72,7 +72,7 @@ public class CubaWebJarsHandler implements RequestHandler {
         if (resourceUrl == null) {
             String msg = String.format("Requested WebJar resource is not found: %s", path);
             response.sendError(HttpServletResponse.SC_NOT_FOUND, msg);
-            log.error(msg);
+            log.warn(msg);
             return false;
         }
 
