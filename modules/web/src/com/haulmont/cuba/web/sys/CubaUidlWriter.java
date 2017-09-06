@@ -86,22 +86,19 @@ public class CubaUidlWriter extends UidlWriter {
         }
 
         int propertyLastIndex = uri.indexOf("}");
-        if (propertyLastIndex == -1) {
+        if (propertyLastIndex == -1 || propertyLastIndex < propertyFirstIndex) {
             String errorMessage = String.format("Malformed URL of a WebJar resource: %s", uri);
             log.error(errorMessage);
             throw new RuntimeException(errorMessage);
         }
 
-        String webJarVersion = StringUtils.EMPTY;
         String propertyName = uri.substring(propertyFirstIndex + 2, propertyLastIndex);
+        String[] splittedProperty = propertyName.split("\\?:");
 
-        int defaultVersionIdx = propertyName.indexOf("?:");
-        if (defaultVersionIdx != -1) {
-            webJarVersion = propertyName.substring(defaultVersionIdx + 2);
-        }
+        String webJarVersion = AppContext.getProperty(splittedProperty[0]);
 
-        if (StringUtils.isEmpty(webJarVersion)) {
-            webJarVersion = AppContext.getProperty(propertyName);
+        if (StringUtils.isEmpty(webJarVersion) && splittedProperty.length > 1) {
+            webJarVersion = splittedProperty[1];
         }
 
         if (StringUtils.isEmpty(webJarVersion)) {
