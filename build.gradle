@@ -585,7 +585,7 @@ configure(webModule) {
         compile(bom['org.webjars:jquery-fileupload'])
         compile(bom['org.webjars:swfobject'])
         compile(bom['org.webjars:swfupload'])
-        compile(bom['org.webjars:ofi'])
+        compile(bom['org.webjars.npm:object-fit-images'])
 
         provided(bom['org.apache.tomcat:tomcat-servlet-api'])
 
